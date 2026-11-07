@@ -25,12 +25,18 @@ uv sync
 ## Run the starter RAG script
 
 ```bash
-uv run python rag.py
+uv run python rag.py                 # interactive Q&A (reuses .chroma)
+uv run python rag.py --rebuild       # re-index data/ then chat
+uv run python rag.py -q 'What is RAG?'   # one-shot only when you pass -q
 ```
 
 Pipeline: load `data/*.md` → split → embed with Ollama → Chroma (`.chroma/`) → answer.
+After you edit files under `data/`, use `--rebuild` once so the index picks them up.
 
-Optional env (see `.env.example`): `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`, `RAG_QUERY`.
+Default is always the interactive loop. A leftover PowerShell `$env:RAG_QUERY` is **ignored**
+unless you pass `-q`. Clear it with `$env:RAG_QUERY = $null` if you want.
+
+Optional env (see `.env.example`): `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`.
 
 ## Layout
 
