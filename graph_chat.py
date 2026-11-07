@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from checkpoint_store import make_sqlite_checkpointer
+from checkpoint_store import make_checkpointer
 from graph_rag import (
   build_graph,
   latest_checkpoint_id,
@@ -61,7 +61,7 @@ def print_result(result: dict, *, thread_id: str, graph) -> None:
 def main() -> None:
   args = parse_args()
   get_vectorstore(rebuild=args.rebuild)
-  checkpointer = make_sqlite_checkpointer()
+  checkpointer = make_checkpointer()
   graph = build_graph(ensure_index=False, checkpointer=checkpointer)
   thread_id = args.thread.strip() or 'default'
   checkpoint_id = (args.checkpoint or '').strip() or None

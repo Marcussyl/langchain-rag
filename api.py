@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from checkpoint_store import make_sqlite_checkpointer
+from checkpoint_store import make_checkpointer
 from graph_rag import (
   build_graph,
   latest_checkpoint_id,
@@ -26,7 +26,7 @@ from index_store import get_vectorstore
 
 # Warm default index once at import (same habit as graph_server).
 get_vectorstore(rebuild=False, quiet=True)
-_checkpointer = make_sqlite_checkpointer()
+_checkpointer = make_checkpointer()
 graph = build_graph(ensure_index=False, checkpointer=_checkpointer)
 
 app = FastAPI(title='langchain-rag', version='0.1.0')

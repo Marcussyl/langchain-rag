@@ -6,8 +6,8 @@ Separate learning repo for **Phase 7** themes that do not belong in
 - RAG / vector stores / document chunking
 - LangGraph `retrieve` → `generate` + local Studio (`langgraph.dev`)
 - Retrieval presets (`chunk_size` / `k` / MMR) + FastAPI `/ask` + tiny chat UI
-- Sqlite thread checkpointer for multi-turn CLI/API (Studio keeps its own)
-- Optional later: Postgres checkpointer, Agent Server deploy
+- Thread checkpointer for multi-turn CLI/API: Sqlite by default, optional Postgres
+- Optional later: Agent Server / `langgraph deploy`
 
 ## Prerequisites
 
@@ -102,10 +102,24 @@ curl http://127.0.0.1:8000/threads/demo/checkpoints
 
 CLI: `history` lists ids; `use <checkpoint_id>` pins the next turn; or `--checkpoint <id>`.
 
+## 6. Optional Postgres checkpointer
+
+Default persistence is `checkpoints.sqlite`. To use Postgres instead:
+
+```bash
+docker compose up -d
+# PowerShell:
+$env:DATABASE_URL = 'postgresql://rag:rag@127.0.0.1:5432/rag_checkpoints'
+uv run python graph_chat.py --thread pg-demo -q 'What is RAG?'
+uv run uvicorn api:app --reload --port 8000
+```
+
+Unset `DATABASE_URL` to fall back to Sqlite. Studio still uses its own store.
+
 ## Env
 
-Optional (see `.env.example`): `OLLAMA_*`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`,
-`RAG_RETRIEVE_K`, `RAG_SEARCH_TYPE` (`similarity` | `mmr`).
+Optional (see `.env.example`): `OLLAMA_*`, `RAG_CHUNK_*`, `RAG_RETRIEVE_K`,
+`RAG_SEARCH_TYPE` (`similarity` | `mmr`), `DATABASE_URL` (Postgres checkpointer).
 
 A leftover PowerShell `$env:RAG_QUERY` is **ignored** unless you pass `-q`.
 
@@ -120,8 +134,9 @@ A leftover PowerShell `$env:RAG_QUERY` is **ignored** unless you pass `-q`.
 | `graph_chat.py` | CLI for the graph |
 | `compare_retrieve.py` | Side-by-side Sources for presets |
 | `api.py` | FastAPI `/` chat UI + `POST /ask` |
-| `checkpoint_store.py` | SqliteSaver for CLI/API threads |
+| `checkpoint_store.py` | SqliteSaver or PostgresSaver for CLI/API |
+| `docker-compose.yml` | Local Postgres for checkpoints |
 | `langgraph.json` | `langgraph.dev` config |
 | `data/` | Source documents to index |
 | `.chroma/` | Persistent Chroma indexes (gitignored) |
-| `checkpoints.sqlite` | Thread history for CLI/API (gitignored) |
+| `checkpoints.sqlite` | Default thread history (gitignored) |
