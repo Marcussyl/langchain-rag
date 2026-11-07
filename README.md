@@ -87,16 +87,20 @@ uv sync --group api
 uv run uvicorn api:app --reload --port 8000
 ```
 
-- Chat UI: http://127.0.0.1:8000/
+- Chat UI: http://127.0.0.1:8000/ (Load history → **use** a `checkpoint_id`)
 - `GET /health`
-- `POST /ask` with `{ "question": "...", "thread_id": "demo" }`
+- `GET /threads/{thread_id}/checkpoints`
+- `POST /ask` with optional `checkpoint_id` to fork from that snapshot
 
 Same `thread_id` reuses Sqlite checkpoints (`checkpoints.sqlite`).  
 `graph_server.py` stays checkpointer-free so Studio can inject its own.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" -d "{\"question\": \"What is RAG?\", \"thread_id\": \"demo\"}"
+curl http://127.0.0.1:8000/threads/demo/checkpoints
 ```
+
+CLI: `history` lists ids; `use <checkpoint_id>` pins the next turn; or `--checkpoint <id>`.
 
 ## Env
 

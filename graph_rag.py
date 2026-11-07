@@ -114,13 +114,73 @@ def build_graph(*, ensure_index: bool = True, checkpointer: Checkpointer | None 
   return graph.compile(checkpointer=checkpointer)
 
 
-def run_turn(graph, question: str, *, thread_id: str | None = None) -> RagState:
-  """Invoke one human turn. With a checkpointer, pass thread_id to keep history."""
+def thread_config(thread_id: str, checkpoint_id: str | None = None) -> dict:
+  """Build LangGraph config. checkpoint_id forks/continues from that snapshot."""
+  configurable: dict[str, str] = {'thread_id': thread_id}
+  if checkpoint_id:
+    configurable['checkpoint_id'] = checkpoint_id
+  return {'configurable': configurable}
+
+
+def list_checkpoints(graph, thread_id: str, *, limit: int = 20) -> list[dict]:
+  """Newest-first checkpoint rows for a thread (for CLI / API time travel)."""
+  rows: list[dict] = []
+  for index, snap in enumerate(graph.get_state_history(thread_config(thread_id))):
+    if index >= limit:
+      break
+    cfg = (snap.config or {}).get('configurable') or {}
+    values = snap.values or {}
+    answer = str(values.get('answer') or '')
+    preview = answer if len(answer) <= 80 else answer[:79] + '…'
+    rows.append(
+      {
+        'index': index,
+        'checkpoint_id': cfg.get('checkpoint_id'),
+        'message_count': len(values.get('messages') or []),
+        'answer_preview': preview,
+        'next': list(snap.next or ()),
+      }
+    )
+  return rows
+
+
+def print_checkpoint_history(graph, thread_id: str, *, limit: int = 12) -> None:
+  print(f'(checkpoints for thread_id={thread_id})')
+  rows = list_checkpoints(graph, thread_id, limit=limit)
+  if not rows:
+    print('  (none yet)')
+    return
+  for row in rows:
+    print(
+      f'  [{row["index"]}] checkpoint_id={row["checkpoint_id"]}  '
+      f'messages={row["message_count"]}  next={row["next"] or ["(done)"]}'
+    )
+    if row['answer_preview']:
+      print(f'       answer: {row["answer_preview"]}')
+
+
+def latest_checkpoint_id(graph, thread_id: str) -> str | None:
+  snap = graph.get_state(thread_config(thread_id))
+  cfg = (snap.config or {}).get('configurable') or {}
+  return cfg.get('checkpoint_id')
+
+
+def run_turn(
+  graph,
+  question: str,
+  *,
+  thread_id: str | None = None,
+  checkpoint_id: str | None = None,
+) -> RagState:
+  """Invoke one human turn.
+
+  - thread_id only → continue from the thread tip
+  - thread_id + checkpoint_id → continue/fork from that snapshot
+  """
   payload: dict = {'messages': [HumanMessage(content=question)]}
   if thread_id is None:
     # Stateless one-shot: seed empty fields so nodes always see keys.
     payload = {**empty_state(), **payload}
     return graph.invoke(payload)
 
-  config = {'configurable': {'thread_id': thread_id}}
-  return graph.invoke(payload, config)
+  return graph.invoke(payload, thread_config(thread_id, checkpoint_id))
