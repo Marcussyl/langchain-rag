@@ -5,7 +5,8 @@ Separate learning repo for **Phase 7** themes that do not belong in
 
 - RAG / vector stores / document chunking
 - LangGraph `retrieve` → `generate` + local Studio (`langgraph.dev`)
-- Optional later: Agent Server deploy, product UI, Postgres checkpointers
+- Retrieval presets (`chunk_size` / `k` / MMR) + minimal FastAPI `/ask`
+- Optional later: Agent Server deploy, richer UI, Postgres checkpointers
 
 ## Prerequisites
 
@@ -23,16 +24,18 @@ ollama pull nomic-embed-text
 uv sync --group dev
 ```
 
+Indexes live under `.chroma/c{chunk}_o{overlap}/` (gitignored). After pulling newer
+chunk settings, run once with `--rebuild` (or `compare_retrieve.py --rebuild`).
+
 ## 1. Starter RAG (LCEL, no graph)
 
 ```bash
-uv run python rag.py                 # interactive Q&A (reuses .chroma)
+uv run python rag.py                 # interactive Q&A (reuses index)
 uv run python rag.py --rebuild       # re-index data/ then chat
 uv run python rag.py -q 'What is RAG?'   # one-shot only when you pass -q
 ```
 
-Pipeline: load `data/*.md` → split → embed with Ollama → Chroma (`.chroma/`) → answer.
-After you edit files under `data/`, use `--rebuild` once so the index picks them up.
+Pipeline: load `data/*.md` → split → embed with Ollama → Chroma → answer.
 
 ## 2. LangGraph RAG (retrieve → generate)
 
@@ -41,8 +44,6 @@ uv run python graph_chat.py
 uv run python graph_chat.py --rebuild
 uv run python graph_chat.py -q 'What is RAG?'
 ```
-
-Same Chroma index; the turn is two nodes so you can inspect them in Studio.
 
 Answers use inline `[n]` cites when the model quotes a chunk, plus a fixed
 `Sources:` footer (filename + preview) appended in Python — not invented by the LLM.
@@ -62,28 +63,53 @@ uv run langgraph dev
 ```
 
 - API default: `http://localhost:2024`
-- Graph name in Studio: **`rag`** (`langgraph.json` → `graph_server.py:graph`)
-- Send a human message; watch `retrieve` then `generate`
+- Graph name in Studio: **`rag`**
 - Do **not** attach SqliteSaver in `graph_server.py` (API owns persistence)
 
-Windows note: `colorama` is in the `dev` group so Studio logging works.
+## 4. Compare retrieval presets
+
+Same question, four presets (baseline / larger chunks / higher `k` / MMR). Default
+prints **Sources only** (no chat LLM):
+
+```bash
+uv run python compare_retrieve.py -q 'What is RAG?'
+uv run python compare_retrieve.py -q 'What is RAG?' --rebuild
+uv run python compare_retrieve.py -q 'What is RAG?' --answer
+```
+
+Scan which filenames/previews look most relevant before changing defaults in `.env`.
+
+## 5. Minimal FastAPI shell
+
+```bash
+uv sync --group api
+uv run uvicorn api:app --reload --port 8000
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" -d "{\"question\": \"What is RAG?\"}"
+```
+
+`GET /health` for a quick liveness check.
 
 ## Env
 
-Optional (see `.env.example`): `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`, `RAG_RETRIEVE_K`.
+Optional (see `.env.example`): `OLLAMA_*`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`,
+`RAG_RETRIEVE_K`, `RAG_SEARCH_TYPE` (`similarity` | `mmr`).
 
-Default is always the interactive loop. A leftover PowerShell `$env:RAG_QUERY` is **ignored**
-unless you pass `-q`. Clear it with `$env:RAG_QUERY = $null` if you want.
+A leftover PowerShell `$env:RAG_QUERY` is **ignored** unless you pass `-q`.
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `index_store.py` | Shared load / Chroma helpers |
+| `index_store.py` | Shared load / Chroma / citations / `RagConfig` |
 | `rag.py` | LCEL RAG demo (no LangGraph) |
 | `graph_rag.py` | StateGraph: retrieve → generate |
 | `graph_server.py` | Studio export (`langgraph.json`) |
 | `graph_chat.py` | CLI for the graph |
+| `compare_retrieve.py` | Side-by-side Sources for presets |
+| `api.py` | FastAPI `POST /ask` |
 | `langgraph.json` | `langgraph.dev` config |
 | `data/` | Source documents to index |
-| `.chroma/` | Persistent Chroma index (gitignored) |
+| `.chroma/` | Persistent Chroma indexes (gitignored) |

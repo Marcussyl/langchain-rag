@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
-
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -17,12 +17,64 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / 'data'
-CHROMA_DIR = ROOT / '.chroma'
-COLLECTION = 'tutor-notes'
+CHROMA_ROOT = ROOT / '.chroma'
+COLLECTION_PREFIX = 'tutor-notes'
 
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama3.2')
 OLLAMA_EMBED_MODEL = os.getenv('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
-RETRIEVE_K = int(os.getenv('RAG_RETRIEVE_K', '3'))
+
+SearchType = Literal['similarity', 'mmr']
+
+
+@dataclass(frozen=True)
+class RagConfig:
+  """Retrieval / chunking knobs used by index + compare scripts."""
+
+  chunk_size: int = 400
+  chunk_overlap: int = 80
+  k: int = 3
+  search_type: SearchType = 'similarity'
+
+  def __post_init__(self) -> None:
+    if self.search_type not in {'similarity', 'mmr'}:
+      raise ValueError(f'unsupported search_type: {self.search_type}')
+    if self.chunk_overlap >= self.chunk_size:
+      raise ValueError('chunk_overlap must be smaller than chunk_size')
+
+  @classmethod
+  def from_env(cls) -> RagConfig:
+    search = os.getenv('RAG_SEARCH_TYPE', 'similarity')
+    if search not in {'similarity', 'mmr'}:
+      raise ValueError(f'unsupported RAG_SEARCH_TYPE: {search}')
+    return cls(
+      chunk_size=int(os.getenv('RAG_CHUNK_SIZE', '400')),
+      chunk_overlap=int(os.getenv('RAG_CHUNK_OVERLAP', '80')),
+      k=int(os.getenv('RAG_RETRIEVE_K', '3')),
+      search_type=search,  # type: ignore[arg-type]
+    )
+
+  @property
+  def label(self) -> str:
+    return (
+      f'chunk={self.chunk_size}/overlap={self.chunk_overlap}/'
+      f'k={self.k}/search={self.search_type}'
+    )
+
+  @property
+  def persist_dir(self) -> Path:
+    # Separate dirs so compare presets do not clobber each other.
+    return CHROMA_ROOT / f'c{self.chunk_size}_o{self.chunk_overlap}'
+
+  @property
+  def collection_name(self) -> str:
+    return f'{COLLECTION_PREFIX}-c{self.chunk_size}-o{self.chunk_overlap}'
+
+
+# Back-compat names used by older imports / docs.
+DEFAULT_CONFIG = RagConfig.from_env()
+RETRIEVE_K = DEFAULT_CONFIG.k
+CHROMA_DIR = DEFAULT_CONFIG.persist_dir
+COLLECTION = DEFAULT_CONFIG.collection_name
 
 
 def load_documents() -> list[Document]:
@@ -50,43 +102,55 @@ def _embeddings() -> OllamaEmbeddings:
   return OllamaEmbeddings(model=OLLAMA_EMBED_MODEL)
 
 
-def build_vectorstore(docs: list[Document]) -> Chroma:
-  splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
+def build_vectorstore(docs: list[Document], config: RagConfig | None = None) -> Chroma:
+  cfg = config or DEFAULT_CONFIG
+  splitter = RecursiveCharacterTextSplitter(
+    chunk_size=cfg.chunk_size,
+    chunk_overlap=cfg.chunk_overlap,
+  )
   splits = splitter.split_documents(docs)
+  cfg.persist_dir.mkdir(parents=True, exist_ok=True)
   return Chroma.from_documents(
     documents=splits,
     embedding=_embeddings(),
-    persist_directory=str(CHROMA_DIR),
-    collection_name=COLLECTION,
+    persist_directory=str(cfg.persist_dir),
+    collection_name=cfg.collection_name,
   )
 
 
-def open_vectorstore() -> Chroma:
-  """Open an existing on-disk Chroma collection."""
+def open_vectorstore(config: RagConfig | None = None) -> Chroma:
+  """Open an existing on-disk Chroma collection for this config."""
+  cfg = config or DEFAULT_CONFIG
   return Chroma(
-    persist_directory=str(CHROMA_DIR),
+    persist_directory=str(cfg.persist_dir),
     embedding_function=_embeddings(),
-    collection_name=COLLECTION,
+    collection_name=cfg.collection_name,
   )
 
 
-def get_vectorstore(*, rebuild: bool = False, quiet: bool = False) -> Chroma:
-  if rebuild and CHROMA_DIR.exists():
-    shutil.rmtree(CHROMA_DIR)
+def get_vectorstore(
+  *,
+  rebuild: bool = False,
+  quiet: bool = False,
+  config: RagConfig | None = None,
+) -> Chroma:
+  cfg = config or DEFAULT_CONFIG
+  if rebuild and cfg.persist_dir.exists():
+    shutil.rmtree(cfg.persist_dir)
     if not quiet:
-      print('(removed old .chroma index)')
+      print(f'(removed old index at {cfg.persist_dir})')
 
-  if not rebuild and CHROMA_DIR.exists():
+  if not rebuild and cfg.persist_dir.exists():
     if not quiet:
-      print(f'(reusing index at {CHROMA_DIR})')
-    return open_vectorstore()
+      print(f'(reusing index at {cfg.persist_dir} | {cfg.label})')
+    return open_vectorstore(cfg)
 
   docs = load_documents()
   if not quiet:
-    print(f'(indexing {len(docs)} document(s) from {DATA_DIR})')
-  store = build_vectorstore(docs)
+    print(f'(indexing {len(docs)} document(s) from {DATA_DIR} | {cfg.label})')
+  store = build_vectorstore(docs, cfg)
   if not quiet:
-    print(f'(wrote index to {CHROMA_DIR})')
+    print(f'(wrote index to {cfg.persist_dir})')
   return store
 
 
@@ -148,12 +212,28 @@ def append_sources_footer(answer: str, citations: list[Citation]) -> str:
   return f'{body}\n\nSources:\n' + '\n'.join(lines)
 
 
+def make_retriever(store: Chroma, config: RagConfig | None = None):
+  cfg = config or DEFAULT_CONFIG
+  if cfg.search_type == 'mmr':
+    return store.as_retriever(
+      search_type='mmr',
+      search_kwargs={
+        'k': cfg.k,
+        'fetch_k': max(20, cfg.k * 4),
+        'lambda_mult': 0.5,
+      },
+    )
+  return store.as_retriever(search_kwargs={'k': cfg.k})
+
+
 def retrieve_context(
   question: str,
   vectorstore: Chroma | None = None,
+  config: RagConfig | None = None,
 ) -> tuple[str, list[Citation], list[Document]]:
-  store = vectorstore or get_vectorstore(rebuild=False, quiet=True)
-  hits = store.as_retriever(search_kwargs={'k': RETRIEVE_K}).invoke(question)
+  cfg = config or DEFAULT_CONFIG
+  store = vectorstore or get_vectorstore(rebuild=False, quiet=True, config=cfg)
+  hits = make_retriever(store, cfg).invoke(question)
   context, citations = format_hits(hits)
   return context, citations, hits
 

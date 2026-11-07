@@ -22,6 +22,10 @@ dev = [
   # Windows: langgraph-api ConsoleRenderer needs colorama
   'colorama',
 ]
+api = [
+  'fastapi>=0.115.0',
+  'uvicorn[standard]>=0.32.0',
+]
 
 [build-system]
 requires = ['hatchling']
@@ -35,4 +39,6 @@ only-include = [
   'graph_rag.py',
   'graph_server.py',
   'graph_chat.py',
+  'compare_retrieve.py',
+  'api.py',
 ]
