@@ -26,3 +26,7 @@ Thumbs.db
 
 # LangGraph API / Studio local state
 .langgraph_api/
+
+# CLI / FastAPI thread checkpointer (not used by langgraph.dev)
+checkpoints.sqlite
+checkpoints.sqlite-*

@@ -5,8 +5,9 @@ Separate learning repo for **Phase 7** themes that do not belong in
 
 - RAG / vector stores / document chunking
 - LangGraph `retrieve` → `generate` + local Studio (`langgraph.dev`)
-- Retrieval presets (`chunk_size` / `k` / MMR) + minimal FastAPI `/ask`
-- Optional later: Agent Server deploy, richer UI, Postgres checkpointers
+- Retrieval presets (`chunk_size` / `k` / MMR) + FastAPI `/ask` + tiny chat UI
+- Sqlite thread checkpointer for multi-turn CLI/API (Studio keeps its own)
+- Optional later: Postgres checkpointer, Agent Server deploy
 
 ## Prerequisites
 
@@ -79,18 +80,23 @@ uv run python compare_retrieve.py -q 'What is RAG?' --answer
 
 Scan which filenames/previews look most relevant before changing defaults in `.env`.
 
-## 5. Minimal FastAPI shell
+## 5. FastAPI shell + chat page
 
 ```bash
 uv sync --group api
 uv run uvicorn api:app --reload --port 8000
 ```
 
-```bash
-curl -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" -d "{\"question\": \"What is RAG?\"}"
-```
+- Chat UI: http://127.0.0.1:8000/
+- `GET /health`
+- `POST /ask` with `{ "question": "...", "thread_id": "demo" }`
 
-`GET /health` for a quick liveness check.
+Same `thread_id` reuses Sqlite checkpoints (`checkpoints.sqlite`).  
+`graph_server.py` stays checkpointer-free so Studio can inject its own.
+
+```bash
+curl -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" -d "{\"question\": \"What is RAG?\", \"thread_id\": \"demo\"}"
+```
 
 ## Env
 
@@ -109,7 +115,9 @@ A leftover PowerShell `$env:RAG_QUERY` is **ignored** unless you pass `-q`.
 | `graph_server.py` | Studio export (`langgraph.json`) |
 | `graph_chat.py` | CLI for the graph |
 | `compare_retrieve.py` | Side-by-side Sources for presets |
-| `api.py` | FastAPI `POST /ask` |
+| `api.py` | FastAPI `/` chat UI + `POST /ask` |
+| `checkpoint_store.py` | SqliteSaver for CLI/API threads |
 | `langgraph.json` | `langgraph.dev` config |
 | `data/` | Source documents to index |
 | `.chroma/` | Persistent Chroma indexes (gitignored) |
+| `checkpoints.sqlite` | Thread history for CLI/API (gitignored) |

@@ -8,6 +8,7 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.types import Checkpointer
 
 from index_store import (
   Citation,
@@ -94,8 +95,12 @@ def generate_node(state: RagState) -> dict:
   }
 
 
-def build_graph(*, ensure_index: bool = True):
-  """Compile retrieve → generate. ensure_index builds/opens .chroma once at compile time."""
+def build_graph(*, ensure_index: bool = True, checkpointer: Checkpointer | None = None):
+  """Compile retrieve → generate.
+
+  Pass a checkpointer for CLI/API multi-turn threads. Leave None for Studio
+  (`graph_server.py`) — langgraph.dev injects its own persistence.
+  """
   if ensure_index:
     # Warm the on-disk index so Studio / first CLI turn do not race cold start.
     get_vectorstore(rebuild=False, quiet=True)
@@ -106,14 +111,16 @@ def build_graph(*, ensure_index: bool = True):
   graph.add_edge(START, 'retrieve')
   graph.add_edge('retrieve', 'generate')
   graph.add_edge('generate', END)
-  return graph.compile()
+  return graph.compile(checkpointer=checkpointer)
 
 
-def run_turn(graph, question: str) -> RagState:
-  result = graph.invoke(
-    {
-      **empty_state(),
-      'messages': [HumanMessage(content=question)],
-    }
-  )
-  return result
+def run_turn(graph, question: str, *, thread_id: str | None = None) -> RagState:
+  """Invoke one human turn. With a checkpointer, pass thread_id to keep history."""
+  payload: dict = {'messages': [HumanMessage(content=question)]}
+  if thread_id is None:
+    # Stateless one-shot: seed empty fields so nodes always see keys.
+    payload = {**empty_state(), **payload}
+    return graph.invoke(payload)
+
+  config = {'configurable': {'thread_id': thread_id}}
+  return graph.invoke(payload, config)
