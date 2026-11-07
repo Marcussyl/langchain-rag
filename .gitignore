@@ -23,3 +23,6 @@ Thumbs.db
 *.sqlite
 *.db
 .lancedb/
+
+# LangGraph API / Studio local state
+.langgraph_api/
