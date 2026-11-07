@@ -6,7 +6,6 @@ __pycache__/
 .ruff_cache/
 dist/
 *.egg-info/
-uv.lock
 
 # Env / secrets
 .env
@@ -19,9 +18,8 @@ uv.lock
 .DS_Store
 Thumbs.db
 
-# Local data (vector indexes, etc.)
-data/
+# Local vector index / data caches
+.chroma/
 *.sqlite
 *.db
-.chroma/
 .lancedb/
