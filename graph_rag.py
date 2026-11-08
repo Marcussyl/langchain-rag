@@ -88,7 +88,22 @@ def retrieve_node(state: RagState) -> dict:
 def generate_node(state: RagState) -> dict:
   question = last_human_text(state.get('messages') or []) or ''
   citations = list(state.get('citations') or [])
-  answer = generate_cited_answer(question, state.get('context') or '', citations)
+
+  def on_token(text: str) -> None:
+    # Custom stream payloads are picked up by stream_mode='custom' (SSE).
+    try:
+      from langgraph.config import get_stream_writer
+
+      get_stream_writer()({'type': 'token', 'text': text})
+    except Exception:  # noqa: BLE001 — non-streaming invoke paths have no writer
+      return
+
+  answer = generate_cited_answer(
+    question,
+    state.get('context') or '',
+    citations,
+    on_token=on_token,
+  )
   return {
     'answer': answer,
     'messages': [AIMessage(content=answer)],
@@ -122,6 +137,13 @@ def thread_config(thread_id: str, checkpoint_id: str | None = None) -> dict:
   return {'configurable': configurable}
 
 
+def _preview_text(text: str, limit: int = 80) -> str:
+  compact = ' '.join((text or '').split())
+  if len(compact) <= limit:
+    return compact
+  return compact[: limit - 1] + '…'
+
+
 def list_checkpoints(graph, thread_id: str, *, limit: int = 20) -> list[dict]:
   """Newest-first checkpoint rows for a thread (for CLI / API time travel)."""
   rows: list[dict] = []
@@ -130,14 +152,16 @@ def list_checkpoints(graph, thread_id: str, *, limit: int = 20) -> list[dict]:
       break
     cfg = (snap.config or {}).get('configurable') or {}
     values = snap.values or {}
+    messages = values.get('messages') or []
+    question = last_human_text(messages) or ''
     answer = str(values.get('answer') or '')
-    preview = answer if len(answer) <= 80 else answer[:79] + '…'
     rows.append(
       {
         'index': index,
         'checkpoint_id': cfg.get('checkpoint_id'),
-        'message_count': len(values.get('messages') or []),
-        'answer_preview': preview,
+        'message_count': len(messages),
+        'question_preview': _preview_text(question),
+        'answer_preview': _preview_text(answer),
         'next': list(snap.next or ()),
       }
     )

@@ -7,6 +7,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import Literal, TypedDict
 
 import settings  # noqa: F401 — load .env before reading os.environ
@@ -181,6 +182,94 @@ def _iter_note_paths() -> list[Path]:
   return paths
 
 
+def _kind_for_path(path: Path) -> Literal['seed', 'upload']:
+  try:
+    path.resolve().relative_to(UPLOAD_DIR.resolve())
+    return 'upload'
+  except ValueError:
+    return 'seed'
+
+
+def list_note_files(*, config: RagConfig | None = None) -> list[dict]:
+  """File-level corpus inventory for the Library UI (disk + optional chunk counts)."""
+  cfg = config or DEFAULT_CONFIG
+  chunk_counts: dict[str, int] = {}
+  if cfg.persist_dir.exists():
+    try:
+      store = open_vectorstore(cfg)
+      raw = store._collection.get(include=['metadatas'])
+      for meta in raw.get('metadatas') or []:
+        if not meta:
+          continue
+        source = str(meta.get('source') or '')
+        if source:
+          chunk_counts[source] = chunk_counts.get(source, 0) + 1
+    except Exception:  # noqa: BLE001 — list still works if Chroma is unavailable
+      chunk_counts = {}
+
+  rows: list[dict] = []
+  for path in _iter_note_paths():
+    source = _source_label(path)
+    stat = path.stat()
+    rows.append(
+      {
+        'source': source,
+        'filename': path.name,
+        'kind': _kind_for_path(path),
+        'suffix': path.suffix.lower(),
+        'bytes': int(stat.st_size),
+        'mtime': int(stat.st_mtime),
+        'chunks': int(chunk_counts.get(source, 0)),
+      }
+    )
+  return rows
+
+
+def resolve_note_path(source: str) -> Path:
+  """Map a source label (e.g. uploads/foo.md) to a path under data/."""
+  cleaned = (source or '').replace('\\', '/').strip().lstrip('/')
+  if not cleaned or cleaned in {'.', '..'} or '..' in cleaned.split('/'):
+    raise ValueError('invalid source')
+  path = (DATA_DIR / cleaned).resolve()
+  data_root = DATA_DIR.resolve()
+  if path != data_root and data_root not in path.parents:
+    raise ValueError('source escapes data/')
+  known = {p.resolve() for p in _iter_note_paths()}
+  if path not in known:
+    raise FileNotFoundError(f'unknown note: {cleaned}')
+  return path
+
+
+def delete_chroma_chunks_for_source(
+  source: str,
+  *,
+  config: RagConfig | None = None,
+) -> int:
+  """Remove vectors whose metadata.source matches. Returns deleted id count."""
+  cfg = config or DEFAULT_CONFIG
+  if not cfg.persist_dir.exists():
+    return 0
+  store = open_vectorstore(cfg)
+  result = store._collection.get(where={'source': source}, include=[])
+  ids = list(result.get('ids') or [])
+  if ids:
+    store.delete(ids=ids)
+  return len(ids)
+
+
+def delete_note_file(source: str, *, config: RagConfig | None = None) -> dict:
+  """Delete a note file under data/ and clear matching Chroma chunks."""
+  path = resolve_note_path(source)
+  label = _source_label(path)
+  removed_chunks = delete_chroma_chunks_for_source(label, config=config)
+  path.unlink(missing_ok=False)
+  return {
+    'source': label,
+    'deleted_file': True,
+    'removed_chunks': removed_chunks,
+  }
+
+
 def documents_from_file(path: Path) -> list[Document]:
   """Load one note file as LangChain Document(s)."""
   suffix = path.suffix.lower()
@@ -258,7 +347,11 @@ def save_upload_bytes(filename: str, data: bytes) -> Path:
 
 
 def ingest_file(path: Path, *, config: RagConfig | None = None, quiet: bool = False) -> dict:
-  """Chunk + embed one file into the active Chroma collection (incremental)."""
+  """Chunk + embed one file into the active Chroma collection (incremental).
+
+  Replaces any existing chunks for the same source label so re-uploads do not
+  leave duplicate vectors.
+  """
   cfg = config or DEFAULT_CONFIG
   docs = documents_from_file(path)
   splitter = RecursiveCharacterTextSplitter(
@@ -266,15 +359,23 @@ def ingest_file(path: Path, *, config: RagConfig | None = None, quiet: bool = Fa
     chunk_overlap=cfg.chunk_overlap,
   )
   splits = splitter.split_documents(docs)
-  store = get_vectorstore(rebuild=False, quiet=True, config=cfg)
+  source = _source_label(path)
+  # Ensure collection exists, then replace prior vectors for this source.
+  get_vectorstore(rebuild=False, quiet=True, config=cfg)
+  removed = delete_chroma_chunks_for_source(source, config=cfg)
+  store = open_vectorstore(cfg)
   store.add_documents(splits)
   if not quiet:
-    print(f'(indexed upload {path.name}: {len(splits)} chunk(s) | {cfg.label})')
+    print(
+      f'(indexed upload {path.name}: {len(splits)} chunk(s)'
+      f'{f", replaced {removed}" if removed else ""} | {cfg.label})'
+    )
   return {
-    'source': _source_label(path),
+    'source': source,
     'path': str(path),
     'chunks': len(splits),
     'docs': len(docs),
+    'replaced_chunks': removed,
   }
 
 
@@ -435,8 +536,17 @@ def _message_text(content: object) -> str:
   return str(content)
 
 
-def generate_cited_answer(question: str, context: str, citations: list[Citation]) -> str:
-  """LLM body + fixed Sources footer."""
+def generate_cited_answer(
+  question: str,
+  context: str,
+  citations: list[Citation],
+  *,
+  on_token: Callable[[str], None] | None = None,
+) -> str:
+  """LLM body + fixed Sources footer.
+
+  Optional on_token(str) receives incremental text chunks for SSE UIs.
+  """
   prompt = ChatPromptTemplate.from_messages(
     [
       ('system', CITATION_SYSTEM),
@@ -444,11 +554,22 @@ def generate_cited_answer(question: str, context: str, citations: list[Citation]
     ]
   )
   model = make_chat_model()
-  result = (prompt | model).invoke(
-    {
-      'context': context or '(no context retrieved)',
-      'question': question,
-    }
-  )
-  body = _message_text(getattr(result, 'content', result))
+  inputs = {
+    'context': context or '(no context retrieved)',
+    'question': question,
+  }
+  chain = prompt | model
+  if on_token is None:
+    result = chain.invoke(inputs)
+    body = _message_text(getattr(result, 'content', result))
+    return append_sources_footer(body, citations)
+
+  parts: list[str] = []
+  for chunk in chain.stream(inputs):
+    text = _message_text(getattr(chunk, 'content', chunk))
+    if not text:
+      continue
+    parts.append(text)
+    on_token(text)
+  body = ''.join(parts)
   return append_sources_footer(body, citations)

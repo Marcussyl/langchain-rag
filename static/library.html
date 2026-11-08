@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Library · langchain-rag</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #f8f7f4;
+      --raised: #f2f0eb;
+      --recessed: #eceae4;
+      --rule: #e2e0d8;
+      --rule-strong: #d3d0c6;
+      --ink: #191c1e;
+      --ink-2: #565c62;
+      --ink-3: #7e848a;
+      --primary: #c25e2e;
+      --primary-hover: #a94f25;
+      --primary-soft: #ffdbcd;
+      --secondary: #1e3a34;
+      --secondary-soft: #c7e6dd;
+      --error: #ba1a1a;
+      --error-bg: #ffdad6;
+      --white: #ffffff;
+      --radius: 0.25rem;
+      --radius-lg: 0.5rem;
+      --shadow: 0 1px 3px rgba(25, 28, 30, 0.05), 0 4px 12px rgba(25, 28, 30, 0.03);
+      --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+      --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      min-height: 100dvh;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 0.9375rem;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      --side-width: 11.5rem;
+    }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .mono { font-family: var(--font-mono); }
+    a { color: var(--primary); }
+    .app {
+      display: flex;
+      min-height: 100dvh;
+      align-items: stretch;
+    }
+    .side-panel {
+      position: sticky;
+      top: 0;
+      flex: 0 0 var(--side-width);
+      width: var(--side-width);
+      height: 100dvh;
+      padding: 1.25rem 0.85rem;
+      background: var(--raised);
+      border-right: 1px solid var(--rule);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      z-index: 20;
+    }
+    .side-label {
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      padding: 0 0.35rem;
+    }
+    .side-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .side-nav a {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      text-decoration: none;
+      font-family: var(--font-display);
+      font-size: 0.9375rem;
+      font-weight: 600;
+      padding: 0.65rem 0.75rem;
+      border-radius: var(--radius);
+      color: var(--ink-2);
+      border: 1px solid transparent;
+    }
+    .side-nav a:hover {
+      color: var(--ink);
+      background: var(--recessed);
+    }
+    .side-nav a.active {
+      color: var(--primary);
+      background: var(--white);
+      border-color: var(--rule);
+      box-shadow: var(--shadow);
+    }
+    .side-nav .nav-mark {
+      width: 1.35rem;
+      height: 1.35rem;
+      border-radius: var(--radius);
+      background: var(--recessed);
+      color: var(--ink-2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .side-nav .nav-mark svg {
+      width: 0.85rem;
+      height: 0.85rem;
+      display: block;
+      stroke: currentColor;
+      fill: none;
+    }
+    .side-nav a.active .nav-mark {
+      background: var(--primary);
+      color: var(--white);
+    }
+    .main-col {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .shell {
+      max-width: 52rem;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1rem 1rem 3rem;
+    }
+    @media (min-width: 768px) {
+      .shell { padding: 1.5rem 1.5rem 3rem; }
+    }
+    @media (max-width: 719px) {
+      body { --side-width: 0px; }
+      .app { flex-direction: column; }
+      .side-panel {
+        position: sticky;
+        top: 0;
+        width: 100%;
+        height: auto;
+        flex: none;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.65rem 0.85rem;
+        border-right: 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      .side-label { display: none; }
+      .side-nav {
+        flex-direction: row;
+        width: 100%;
+      }
+      .side-nav a { flex: 1 1 0; justify-content: center; }
+    }
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--rule);
+      margin-bottom: 1.25rem;
+    }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .brand-row {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .brand-name {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.5rem;
+      letter-spacing: -0.02em;
+      color: var(--primary);
+      line-height: 1.2;
+    }
+    .brand-tag {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--ink-2);
+    }
+    .brand-sub {
+      font-size: 0.8125rem;
+      color: var(--ink-2);
+      margin: 0.15rem 0 0;
+    }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem 0.55rem;
+      background: var(--raised);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--ink);
+    }
+    .badge .dot {
+      width: 0.375rem;
+      height: 0.375rem;
+      border-radius: 9999px;
+      background: var(--secondary);
+    }
+    .hero { margin-bottom: 1.25rem; }
+    .hero h1 {
+      margin: 0 0 0.35rem;
+      font-family: var(--font-display);
+      font-size: clamp(1.35rem, 3vw, 2rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--primary);
+    }
+    .hero p {
+      margin: 0;
+      color: var(--ink-2);
+      font-size: 1.0625rem;
+      max-width: 40rem;
+    }
+    .panel {
+      background: var(--white);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      padding: 0.875rem;
+      margin-bottom: 1.25rem;
+    }
+    .upload-zone {
+      border: 1px dashed var(--rule-strong);
+      border-radius: var(--radius-lg);
+      background: var(--raised);
+      padding: 1.25rem 1.1rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+      outline: none;
+    }
+    .upload-zone:hover,
+    .upload-zone:focus-visible {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+    }
+    .upload-zone.dragover {
+      border-color: var(--primary);
+      border-style: solid;
+      background: var(--primary-soft);
+    }
+    .upload-zone.busy {
+      opacity: 0.7;
+      pointer-events: none;
+    }
+    .upload-title {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 0.25rem;
+    }
+    .upload-sub {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--ink-3);
+      line-height: 1.45;
+    }
+    .upload-status {
+      margin-top: 0.65rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--ink-2);
+      text-align: left;
+      white-space: pre-wrap;
+    }
+    .upload-status.error { color: var(--error); }
+    .upload-status.ok { color: var(--secondary); }
+    .list-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .list-head h2 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.125rem;
+      font-weight: 600;
+    }
+    .list-note {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--ink-3);
+    }
+    .doc-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.65rem;
+      padding: 0.75rem 0.8rem;
+      border-radius: var(--radius);
+      background: var(--raised);
+      border: 1px solid transparent;
+      margin-bottom: 0.5rem;
+    }
+    .doc-row:hover { border-color: var(--rule-strong); background: var(--recessed); }
+    .doc-meta {
+      min-width: 0;
+      flex: 1 1 14rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .doc-source {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 0.8125rem;
+      color: var(--ink);
+      word-break: break-all;
+    }
+    .doc-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.55rem;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--ink-2);
+    }
+    .pill {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: var(--radius);
+      background: var(--secondary-soft);
+      color: var(--secondary);
+    }
+    .pill.upload { background: var(--primary-soft); color: var(--primary-hover); }
+    .btn {
+      border: 1px solid var(--rule);
+      background: var(--raised);
+      color: var(--ink);
+      border-radius: var(--radius);
+      padding: 0.4rem 0.7rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .btn:hover { background: var(--recessed); }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-danger {
+      background: var(--error-bg);
+      border-color: transparent;
+      color: var(--error);
+    }
+    .btn-danger:hover:not(:disabled) {
+      border-color: var(--error);
+    }
+    .btn-ghost {
+      border-color: transparent;
+      background: transparent;
+      color: var(--ink-2);
+    }
+    .state-box {
+      padding: 1.25rem;
+      text-align: center;
+      background: var(--raised);
+      border-radius: var(--radius);
+      color: var(--ink-2);
+      font-size: 0.8125rem;
+    }
+    .state-box.loading {
+      color: var(--primary);
+      font-family: var(--font-mono);
+    }
+    .state-box.error {
+      text-align: left;
+      background: var(--error-bg);
+      color: var(--error);
+      border-left: 3px solid var(--primary);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side-panel" aria-label="Workspace">
+      <div class="side-label">Workspace</div>
+      <nav class="side-nav" aria-label="Primary">
+        <a href="/">
+          <span class="nav-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </span>
+          Chat
+        </a>
+        <a class="active" href="/library" aria-current="page">
+          <span class="nav-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+          </span>
+          Library
+        </a>
+      </nav>
+    </aside>
+    <div class="main-col">
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-row">
+          <span class="brand-name">langchain-rag</span>
+          <span class="brand-tag">// notes bench</span>
+        </div>
+        <p class="brand-sub">knowledge base · disk files indexed into Chroma</p>
+      </div>
+      <div class="top-actions">
+        <span class="badge" title="Chat backend"><span class="dot"></span>{{CHAT_BACKEND}}</span>
+        <span class="badge" title="Checkpointer"><span class="dot"></span>{{CHECKPOINTER}}</span>
+        <span class="badge" title="Embedding model"><span class="dot"></span>{{EMBED_MODEL}}</span>
+      </div>
+    </header>
+
+    <section class="hero">
+      <h1>Knowledge base</h1>
+      <p>
+        Upload notes here and see every file available for retrieval.
+        Listing is the source files on disk; vectors are written to Chroma on upload or rebuild.
+      </p>
+    </section>
+
+    <section class="panel" aria-label="Upload">
+      <div
+        class="upload-zone"
+        id="uploadZone"
+        tabindex="0"
+        role="button"
+        aria-label="Upload notes to the knowledge base"
+      >
+        <input
+          type="file"
+          id="fileInput"
+          multiple
+          accept=".md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf"
+          hidden
+        />
+        <div class="upload-title">Drop notes here</div>
+        <div class="upload-sub">or click to choose · .md .txt .pdf · replaces prior chunks for the same name</div>
+        <div class="upload-status" id="uploadStatus" hidden></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Documents">
+      <div class="list-head">
+        <h2>Corpus files</h2>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <span class="list-note" id="listMeta">{{DOC_COUNT}} on disk</span>
+          <button type="button" class="btn btn-ghost" id="refreshBtn">Refresh</button>
+        </div>
+      </div>
+      <div id="docList" aria-live="polite">
+        <div class="state-box loading">LOADING…</div>
+      </div>
+    </section>
+  </div>
+    </div><!-- .main-col -->
+  </div><!-- .app -->
+
+  <script>
+    const uploadZone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('fileInput');
+    const uploadStatus = document.getElementById('uploadStatus');
+    const docList = document.getElementById('docList');
+    const listMeta = document.getElementById('listMeta');
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function setUploadStatus(text, kind) {
+      uploadStatus.hidden = !text;
+      uploadStatus.textContent = text || '';
+      uploadStatus.classList.remove('ok', 'error');
+      if (kind) uploadStatus.classList.add(kind);
+    }
+
+    function formatBytes(n) {
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function formatTime(epochSec) {
+      try {
+        return new Date(epochSec * 1000).toLocaleString();
+      } catch (_err) {
+        return String(epochSec);
+      }
+    }
+
+    function renderDocs(docs) {
+      listMeta.textContent = docs.length + ' on disk';
+      if (!docs.length) {
+        docList.innerHTML =
+          '<div class="state-box">No notes yet. Upload a .md / .txt / .pdf to start the corpus.</div>';
+        return;
+      }
+      docList.innerHTML = docs.map(function (row) {
+        const kindClass = row.kind === 'upload' ? 'pill upload' : 'pill';
+        return (
+          '<div class="doc-row" data-source="' + escapeHtml(row.source) + '">'
+          + '<div class="doc-meta">'
+          + '<div class="doc-source">' + escapeHtml(row.source) + '</div>'
+          + '<div class="doc-stats">'
+          + '<span class="' + kindClass + '">' + escapeHtml(row.kind) + '</span>'
+          + '<span>' + escapeHtml(row.suffix || '') + '</span>'
+          + '<span>' + formatBytes(row.bytes || 0) + '</span>'
+          + '<span>' + (row.chunks || 0) + ' chunk(s)</span>'
+          + '<span>' + formatTime(row.mtime || 0) + '</span>'
+          + '</div></div>'
+          + '<button type="button" class="btn btn-danger del-btn" data-source="'
+          + escapeHtml(row.source) + '">Delete</button>'
+          + '</div>'
+        );
+      }).join('');
+
+      docList.querySelectorAll('.del-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          deleteDoc(btn.getAttribute('data-source') || '');
+        });
+      });
+    }
+
+    async function loadDocs() {
+      docList.innerHTML = '<div class="state-box loading">LOADING…</div>';
+      try {
+        const res = await fetch('/documents');
+        const data = await res.json();
+        if (!res.ok) {
+          docList.innerHTML =
+            '<div class="state-box error">' + escapeHtml(JSON.stringify(data)) + '</div>';
+          return;
+        }
+        renderDocs(data.documents || []);
+      } catch (err) {
+        docList.innerHTML =
+          '<div class="state-box error">' + escapeHtml(String(err)) + '</div>';
+      }
+    }
+
+    async function deleteDoc(source) {
+      if (!source) return;
+      if (!window.confirm('Delete ' + source + ' from disk and remove its Chroma chunks?')) {
+        return;
+      }
+      try {
+        const res = await fetch('/documents/' + encodeURIComponent(source), {
+          method: 'DELETE',
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok) {
+          setUploadStatus(
+            typeof data.detail === 'string' ? data.detail : JSON.stringify(data),
+            'error'
+          );
+          return;
+        }
+        setUploadStatus(
+          'Deleted ' + data.source + ' · removed ' + data.removed_chunks + ' chunk(s)',
+          'ok'
+        );
+        loadDocs();
+      } catch (err) {
+        setUploadStatus(String(err && err.message ? err.message : err), 'error');
+      }
+    }
+
+    async function uploadFiles(fileList) {
+      const files = Array.from(fileList || []).filter(Boolean);
+      if (!files.length) return;
+      const body = new FormData();
+      files.forEach(function (file) {
+        body.append('files', file, file.name);
+      });
+      uploadZone.classList.add('busy');
+      setUploadStatus('Uploading and indexing ' + files.length + ' file(s)…');
+      try {
+        const res = await fetch('/upload', { method: 'POST', body: body });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok) {
+          const detail = data.detail;
+          let msg = 'Upload failed';
+          if (typeof detail === 'string') msg = detail;
+          else if (detail && detail.message) msg = detail.message;
+          setUploadStatus(msg, 'error');
+          return;
+        }
+        const lines = (data.files || []).map(function (row) {
+          if (row.ok) return '✓ ' + row.source + ' → ' + row.chunks + ' chunk(s)';
+          return '✗ ' + row.filename + ': ' + (row.error || 'failed');
+        });
+        setUploadStatus(
+          'Indexed ' + data.indexed + '/' + files.length + '\n' + lines.join('\n'),
+          data.indexed ? 'ok' : 'error'
+        );
+        loadDocs();
+      } catch (err) {
+        setUploadStatus(String(err && err.message ? err.message : err), 'error');
+      } finally {
+        uploadZone.classList.remove('busy');
+        fileInput.value = '';
+      }
+    }
+
+    uploadZone.addEventListener('click', function () { fileInput.click(); });
+    uploadZone.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+    fileInput.addEventListener('change', function () { uploadFiles(fileInput.files); });
+    uploadZone.addEventListener('dragenter', function (e) {
+      e.preventDefault();
+      uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', function (e) {
+      if (!uploadZone.contains(e.relatedTarget)) {
+        uploadZone.classList.remove('dragover');
+      }
+    });
+    uploadZone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      uploadFiles(e.dataTransfer && e.dataTransfer.files);
+    });
+    document.getElementById('refreshBtn').addEventListener('click', loadDocs);
+    loadDocs();
+  </script>
+</body>
+</html>
