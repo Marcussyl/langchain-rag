@@ -87,7 +87,7 @@ uv sync --group api
 uv run uvicorn api:app --reload --port 8000
 ```
 
-- Chat UI: http://127.0.0.1:8000/ (Load history → **use** a `checkpoint_id`)
+- Chat UI: http://127.0.0.1:8000/ (`static/chat.html` — Load history → **Use** a `checkpoint_id`)
 - `GET /health`
 - `GET /threads/{thread_id}/checkpoints`
 - `POST /ask` with optional `checkpoint_id` to fork from that snapshot
@@ -134,6 +134,7 @@ A leftover PowerShell `$env:RAG_QUERY` is **ignored** unless you pass `-q`.
 | `graph_chat.py` | CLI for the graph |
 | `compare_retrieve.py` | Side-by-side Sources for presets |
 | `api.py` | FastAPI `/` chat UI + `POST /ask` |
+| `static/chat.html` | Notes workbench UI (served at `/`) |
 | `checkpoint_store.py` | SqliteSaver or PostgresSaver for CLI/API |
 | `docker-compose.yml` | Local Postgres for checkpoints |
 | `langgraph.json` | `langgraph.dev` config |

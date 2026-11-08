@@ -15,6 +15,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import settings  # noqa: F401 — load .env before reading DATABASE_URL
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 ROOT = Path(__file__).resolve().parent

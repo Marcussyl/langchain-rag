@@ -4,25 +4,38 @@
   uv sync --group api
   uv run uvicorn api:app --reload --port 8000
 
-  Open http://127.0.0.1:8000/ for a tiny chat UI.
+  Open http://127.0.0.1:8000/ for the notes chat UI (Stitch-inspired workbench).
   curl -X POST http://127.0.0.1:8000/ask -H 'Content-Type: application/json' ^
     -d "{\"question\": \"What is RAG?\", \"thread_id\": \"demo\"}"
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import html
+import os
+from pathlib import Path
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from checkpoint_store import make_checkpointer
+import settings  # noqa: F401 — load .env before checkpointer / graph
+from checkpoint_store import database_url, make_checkpointer
 from graph_rag import (
   build_graph,
   latest_checkpoint_id,
   list_checkpoints,
   run_turn,
 )
-from index_store import get_vectorstore
+from index_store import (
+  ALLOWED_UPLOAD_SUFFIXES,
+  DEFAULT_CONFIG,
+  MAX_UPLOAD_BYTES,
+  OLLAMA_EMBED_MODEL,
+  get_vectorstore,
+  ingest_file,
+  save_upload_bytes,
+)
 
 # Warm default index once at import (same habit as graph_server).
 get_vectorstore(rebuild=False, quiet=True)
@@ -30,6 +43,8 @@ _checkpointer = make_checkpointer()
 graph = build_graph(ensure_index=False, checkpointer=_checkpointer)
 
 app = FastAPI(title='langchain-rag', version='0.1.0')
+
+CHAT_HTML_PATH = Path(__file__).resolve().parent / 'static' / 'chat.html'
 
 
 class AskRequest(BaseModel):
@@ -58,111 +73,53 @@ class CheckpointRow(BaseModel):
   next: list[str]
 
 
-CHAT_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>langchain-rag chat</title>
-  <style>
-    :root { color-scheme: light; font-family: 'Segoe UI', system-ui, sans-serif; }
-    body { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; }
-    h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-    .meta { color: #555; font-size: 0.9rem; margin-bottom: 1rem; }
-    #log { border: 1px solid #ccc; min-height: 12rem; padding: 0.75rem; white-space: pre-wrap; background: #fafafa; }
-    #history { border: 1px solid #ddd; max-height: 10rem; overflow: auto; padding: 0.5rem; font-size: 0.85rem; margin: 0.5rem 0; background: #fff; }
-    form, .row { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
-    input, button { font: inherit; padding: 0.45rem 0.6rem; }
-    button { cursor: pointer; }
-    .row { grid-template-columns: 1fr auto; align-items: end; }
-  </style>
-</head>
-<body>
-  <h1>langchain-rag</h1>
-  <p class="meta">
-    <code>thread_id</code> = which chat.
-    Optional <code>checkpoint_id</code> = resume/fork from that snapshot (leave blank for tip).
-  </p>
-  <div class="row">
-    <label>thread_id <input id="thread" value="default" /></label>
-    <button type="button" id="loadHist">Load history</button>
-  </div>
-  <label>checkpoint_id (optional)
-    <input id="ckpt" placeholder="paste id from history…" style="width:100%" />
-  </label>
-  <div id="history">(click Load history)</div>
-  <div id="log"></div>
-  <form id="f">
-    <input id="q" placeholder="Ask about the notes…" autocomplete="off" required />
-    <button type="submit">Ask</button>
-  </form>
-  <script>
-    const log = document.getElementById('log');
-    const history = document.getElementById('history');
-    const ckpt = document.getElementById('ckpt');
+class UploadItemResult(BaseModel):
+  filename: str
+  source: str
+  chunks: int
+  ok: bool
+  error: str | None = None
 
-    async function loadHistory() {
-      const thread_id = document.getElementById('thread').value.trim() || 'default';
-      const res = await fetch('/threads/' + encodeURIComponent(thread_id) + '/checkpoints');
-      const data = await res.json();
-      if (!res.ok) {
-        history.textContent = 'Error: ' + JSON.stringify(data);
-        return;
-      }
-      if (!data.length) {
-        history.textContent = '(no checkpoints yet for this thread)';
-        return;
-      }
-      history.innerHTML = data.map((row) => {
-        const id = row.checkpoint_id || '';
-        return '<div><button type="button" data-id="' + id + '">use</button> '
-          + '[' + row.index + '] msgs=' + row.message_count
-          + ' <code>' + id + '</code><br/>' + (row.answer_preview || '') + '</div>';
-      }).join('<hr/>');
-      history.querySelectorAll('button[data-id]').forEach((btn) => {
-        btn.addEventListener('click', () => { ckpt.value = btn.getAttribute('data-id') || ''; });
-      });
-    }
 
-    document.getElementById('loadHist').addEventListener('click', loadHistory);
+class UploadResponse(BaseModel):
+  files: list[UploadItemResult]
+  indexed: int
 
-    document.getElementById('f').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const question = document.getElementById('q').value.trim();
-      const thread_id = document.getElementById('thread').value.trim() || 'default';
-      const checkpoint_id = ckpt.value.trim() || null;
-      if (!question) return;
-      log.textContent += 'You: ' + question + '\\n';
-      document.getElementById('q').value = '';
-      const body = { question, thread_id };
-      if (checkpoint_id) body.checkpoint_id = checkpoint_id;
-      const res = await fetch('/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        log.textContent += 'Error: ' + JSON.stringify(data) + '\\n\\n';
-        return;
-      }
-      log.textContent += 'Bot: ' + data.answer
-        + '\\n(messages=' + data.message_count
-        + ', checkpoint_id=' + (data.checkpoint_id || '') + ')\\n\\n';
-      log.scrollTop = log.scrollHeight;
-      // After a turn, clear optional fork id so the next ask continues from the new tip.
-      ckpt.value = '';
-      loadHistory();
-    });
-  </script>
-</body>
-</html>
-"""
+
+def _chat_backend_label() -> str:
+  backend = (os.getenv('CHAT_BACKEND') or 'ollama').strip().lower() or 'ollama'
+  if backend == 'openrouter':
+    model = (os.getenv('OPENROUTER_MODEL') or 'openrouter').strip() or 'openrouter'
+    short = model.split('/')[-1]
+    if len(short) > 28:
+      short = short[:27] + '…'
+    return f'openrouter · {short}'
+  if backend == 'gemini':
+    return (os.getenv('GEMINI_MODEL') or 'gemini').strip() or 'gemini'
+  if backend == 'groq':
+    return (os.getenv('GROQ_MODEL') or 'groq').strip() or 'groq'
+  return (os.getenv('OLLAMA_MODEL') or 'ollama').strip() or 'ollama'
+
+
+def render_chat_html() -> str:
+  """Fill static/chat.html with live backend labels (skip unimplemented Stitch chrome)."""
+  template = CHAT_HTML_PATH.read_text(encoding='utf-8')
+  checkpointer = 'postgres checkpointer' if database_url() else 'sqlite checkpointer'
+  return (
+    template
+    .replace('{{CHAT_BACKEND}}', html.escape(_chat_backend_label()))
+    .replace('{{CHECKPOINTER}}', html.escape(checkpointer))
+    .replace('{{EMBED_MODEL}}', html.escape(OLLAMA_EMBED_MODEL))
+    .replace('{{RETRIEVE_K}}', html.escape(str(DEFAULT_CONFIG.k)))
+    .replace('{{SEARCH_TYPE}}', html.escape(DEFAULT_CONFIG.search_type))
+  )
 
 
 @app.get('/', response_class=HTMLResponse)
 def chat_page() -> str:
-  return CHAT_HTML
+  if not CHAT_HTML_PATH.is_file():
+    raise HTTPException(status_code=500, detail=f'missing UI template: {CHAT_HTML_PATH}')
+  return render_chat_html()
 
 
 @app.get('/health')
@@ -198,3 +155,51 @@ def ask(body: AskRequest) -> AskResponse:
     message_count=len(messages),
     checkpoint_id=latest_checkpoint_id(graph, thread_id),
   )
+
+
+@app.post('/upload', response_model=UploadResponse)
+async def upload_notes(files: list[UploadFile] = File(...)) -> UploadResponse:
+  """Save notes under data/uploads/ and incrementally index into Chroma."""
+  if not files:
+    raise HTTPException(status_code=400, detail='no files uploaded')
+
+  results: list[UploadItemResult] = []
+  indexed = 0
+  for upload in files:
+    name = upload.filename or 'unnamed'
+    try:
+      data = await upload.read()
+      if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(f'file too large (max {MAX_UPLOAD_BYTES} bytes)')
+      path = save_upload_bytes(name, data)
+      info = ingest_file(path, quiet=True)
+      indexed += 1
+      results.append(
+        UploadItemResult(
+          filename=name,
+          source=str(info['source']),
+          chunks=int(info['chunks']),
+          ok=True,
+        )
+      )
+    except Exception as exc:  # noqa: BLE001 — per-file errors returned to UI
+      results.append(
+        UploadItemResult(
+          filename=name,
+          source='',
+          chunks=0,
+          ok=False,
+          error=str(exc),
+        )
+      )
+
+  if indexed == 0:
+    raise HTTPException(
+      status_code=400,
+      detail={
+        'message': 'no files indexed',
+        'allowed': sorted(ALLOWED_UPLOAD_SUFFIXES),
+        'files': [item.model_dump() for item in results],
+      },
+    )
+  return UploadResponse(files=results, indexed=indexed)

@@ -24,6 +24,10 @@ Thumbs.db
 *.db
 .lancedb/
 
+# User uploads (keep folder)
+data/uploads/*
+!data/uploads/.gitkeep
+
 # LangGraph API / Studio local state
 .langgraph_api/
 

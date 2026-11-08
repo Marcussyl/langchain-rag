@@ -17,6 +17,10 @@ dependencies = [
   'langgraph-checkpoint-sqlite>=2.0.0',
   "langgraph-checkpoint-postgres>=2.0.0",
   "psycopg[binary,pool]>=3.0.0",
+  "langchain-google-genai>=4.4.3",
+  "langchain-groq>=1.1.3",
+  "langchain-openai>=1.7.4",
+  "pypdf>=7.0.0",
 ]
 
 [dependency-groups]
@@ -27,6 +31,8 @@ dev = [
 ]
 api = [
   'fastapi>=0.115.0',
+  "pypdf>=7.0.0",
+  "python-multipart>=0.0.9",
   'uvicorn[standard]>=0.32.0',
 ]
 
@@ -37,6 +43,7 @@ build-backend = 'hatchling.build'
 # Flat layout: ship root modules so langgraph.json dependencies ["."] can install.
 [tool.hatch.build.targets.wheel]
 only-include = [
+  'settings.py',
   'index_store.py',
   'rag.py',
   'graph_rag.py',
