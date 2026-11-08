@@ -28,6 +28,10 @@ Thumbs.db
 data/uploads/*
 !data/uploads/.gitkeep
 
+# Design extracts (not part of the runtime app)
+stitch_ui_extract/
+stitch_langchain_rag_notes_ui.zip
+
 # LangGraph API / Studio local state
 .langgraph_api/
 

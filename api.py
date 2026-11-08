@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -20,7 +21,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 import settings  # noqa: F401 — load .env before checkpointer / graph
-from checkpoint_store import database_url, make_checkpointer
+from checkpoint_store import close_checkpointer_resources, database_url, make_checkpointer
 from graph_rag import (
   build_graph,
   latest_checkpoint_id,
@@ -42,7 +43,14 @@ get_vectorstore(rebuild=False, quiet=True)
 _checkpointer = make_checkpointer()
 graph = build_graph(ensure_index=False, checkpointer=_checkpointer)
 
-app = FastAPI(title='langchain-rag', version='0.1.0')
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+  yield
+  close_checkpointer_resources()
+
+
+app = FastAPI(title='langchain-rag', version='0.1.0', lifespan=lifespan)
 
 CHAT_HTML_PATH = Path(__file__).resolve().parent / 'static' / 'chat.html'
 
