@@ -7,98 +7,83 @@ Prereqs:
   ollama pull nomic-embed-text
 
 Run from repo root:
-  uv run python rag.py
+  uv run python rag.py              # interactive Q&A (reuses .chroma if present)
+  uv run python rag.py --rebuild    # re-index data/ then chat
+  uv run python rag.py -q '...'     # one-shot question
+
+LangGraph version (retrieve → generate nodes + Studio):
+  uv run python graph_chat.py
+  uv run langgraph dev
 """
 
 from __future__ import annotations
 
+import argparse
 import os
-from pathlib import Path
 
 from langchain_chroma import Chroma
-from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama, OllamaEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / 'data'
-CHROMA_DIR = ROOT / '.chroma'
-COLLECTION = 'tutor-notes'
-
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama3.2')
-OLLAMA_EMBED_MODEL = os.getenv('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
-
-
-def load_documents() -> list[Document]:
-  """Load every .md / .txt under data/ (creates sample files if empty)."""
-  DATA_DIR.mkdir(exist_ok=True)
-  paths = sorted([*DATA_DIR.glob('*.md'), *DATA_DIR.glob('*.txt')])
-  if not paths:
-    sample = DATA_DIR / 'sample.md'
-    sample.write_text(
-      '# Sample notes\n\n'
-      'RAG means Retrieval Augmented Generation: fetch relevant chunks, then ask the LLM.\n\n'
-      'This project uses local Ollama embeddings and a Chroma vector store on disk.\n',
-      encoding='utf-8',
-    )
-    paths = [sample]
-
-  docs: list[Document] = []
-  for path in paths:
-    text = path.read_text(encoding='utf-8')
-    docs.append(Document(page_content=text, metadata={'source': str(path.name)}))
-  return docs
-
-
-def build_vectorstore(docs: list[Document]) -> Chroma:
-  splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
-  splits = splitter.split_documents(docs)
-  embeddings = OllamaEmbeddings(model=OLLAMA_EMBED_MODEL)
-  return Chroma.from_documents(
-    documents=splits,
-    embedding=embeddings,
-    persist_directory=str(CHROMA_DIR),
-    collection_name=COLLECTION,
-  )
+from index_store import generate_cited_answer, get_vectorstore, retrieve_context
 
 
 def answer(query: str, vectorstore: Chroma) -> str:
-  retriever = vectorstore.as_retriever(search_kwargs={'k': 3})
-  hits = retriever.invoke(query)
-  context = '\n\n'.join(
-    f'[{doc.metadata.get("source", "?")}]\n{doc.page_content}' for doc in hits
-  )
+  context, citations, hits = retrieve_context(query, vectorstore)
   print('(retrieved chunks)')
-  for index, doc in enumerate(hits, start=1):
-    preview = doc.page_content.replace('\n', ' ')[:120]
-    print(f'  {index}. {doc.metadata.get("source")}: {preview}…')
+  for row, doc in zip(citations, hits, strict=True):
+    print(f'  [{row["index"]}] {row["source"]}: {row["preview"]}')
+  return generate_cited_answer(query, context, citations)
 
-  prompt = ChatPromptTemplate.from_messages(
-    [
-      (
-        'system',
-        'Answer using ONLY the context below. If the context is not enough, say so.\n\n'
-        'Context:\n{context}',
-      ),
-      ('human', '{question}'),
-    ]
+
+def parse_args() -> argparse.Namespace:
+  parser = argparse.ArgumentParser(description='Local Ollama + Chroma RAG demo')
+  parser.add_argument(
+    '-q',
+    '--query',
+    default=None,
+    help='One-shot question (skip interactive loop). Do not rely on leftover RAG_QUERY env.',
   )
-  model = ChatOllama(model=OLLAMA_MODEL, temperature=0)
-  chain = prompt | model
-  result = chain.invoke({'context': context, 'question': query})
-  content = getattr(result, 'content', result)
-  return content if isinstance(content, str) else str(content)
+  parser.add_argument(
+    '--rebuild',
+    action='store_true',
+    help='Delete .chroma and re-index everything under data/',
+  )
+  return parser.parse_args()
 
 
 def main() -> None:
-  docs = load_documents()
-  print(f'(loaded {len(docs)} document(s) from {DATA_DIR})')
-  store = build_vectorstore(docs)
-  query = os.getenv('RAG_QUERY', 'What is RAG and what vector store does this project use?')
-  print(f'(query) {query}')
+  args = parse_args()
+  store = get_vectorstore(rebuild=args.rebuild)
+
+  # Only -q/--query triggers one-shot. A leftover $env:RAG_QUERY must not steal the REPL.
+  if args.query:
+    print(f'(query) {args.query}')
+    print()
+    print('Bot:', answer(args.query, store))
+    return
+
+  leftover = os.getenv('RAG_QUERY')
+  if leftover:
+    print('(note: RAG_QUERY is set in the shell but ignored; use -q to one-shot, or clear it)')
+
+  print('Interactive RAG. Empty input ignored; type q to quit.')
+  print('After editing files in data/, restart with: uv run python rag.py --rebuild')
+  print('LangGraph + Studio: uv run python graph_chat.py  |  uv run langgraph dev')
   print()
-  print('Bot:', answer(query, store))
+  while True:
+    try:
+      raw = input('You: ').strip()
+    except (EOFError, KeyboardInterrupt):
+      print()
+      print('Bye.')
+      break
+    if not raw:
+      continue
+    if raw.lower() in {'q', 'quit', 'exit'}:
+      print('Bye.')
+      break
+    print()
+    print('Bot:', answer(raw, store))
+    print()
 
 
 if __name__ == '__main__':

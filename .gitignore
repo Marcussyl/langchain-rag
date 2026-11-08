@@ -23,3 +23,18 @@ Thumbs.db
 *.sqlite
 *.db
 .lancedb/
+
+# User uploads (keep folder)
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Design extracts (not part of the runtime app)
+stitch_ui_extract/
+stitch_langchain_rag_notes_ui.zip
+
+# LangGraph API / Studio local state
+.langgraph_api/
+
+# CLI / FastAPI thread checkpointer (not used by langgraph.dev)
+checkpoints.sqlite
+checkpoints.sqlite-*
